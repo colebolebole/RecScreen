@@ -113,6 +113,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   for (const r of recs.values()) { try { r.stream.end(); } catch { /* ignore */ } }
   for (const s of streams.values()) { try { s.closed = true; if (s.proc) s.proc.kill(); } catch { /* ignore */ } }
+  if (compressJob) { try { compressJob.cancelled = true; if (compressJob.proc) compressJob.proc.kill(); } catch { /* ignore */ } }
 });
 
 /* ------------------------------------------------------------------ */
@@ -432,7 +433,11 @@ ipcMain.handle('compress:start', async (_e, o) => {
   if (compressJob) return { ok: false, error: 'A compression is already running.' };
   const ff = ffmpegPath();
   if (!ff) return { ok: false, error: 'ffmpeg is not installed. Download it in Settings → Output.' };
-  const { input, targetMB, id } = o;
+  const { input, targetMB, id } = o || {};
+  // The renderer supplies these, so check them: they end up in file names and ffmpeg arguments.
+  if (typeof input !== 'string' || !path.isAbsolute(input)) return { ok: false, error: 'Invalid recording path.' };
+  if (typeof targetMB !== 'number' || !Number.isFinite(targetMB) || targetMB < 1 || targetMB > 4096) return { ok: false, error: 'Invalid target size.' };
+  if (typeof id !== 'string' || !/^[\w-]{1,40}$/.test(id)) return { ok: false, error: 'Invalid job id.' };
   let bytes = 0;
   try { bytes = fs.statSync(input).size; } catch { return { ok: false, error: 'The recording file is gone.' }; }
   const limit = targetMB * 1048576;
@@ -455,7 +460,9 @@ ipcMain.handle('compress:start', async (_e, o) => {
   const runPass = (pass, dest) => new Promise((resolve) => {
     const args = ['-y', '-i', input, '-c:v', 'libx264', '-preset', 'veryfast', '-b:v', `${videoKbps}k`,
       '-pass', String(pass), '-passlogfile', log, '-sn', '-dn',
-      ...(pass === 2 ? [...scale, '-c:a', 'aac', '-b:a', `${audioKbps}k`, '-movflags', '+faststart'] : ['-an']),
+      // Both passes must see the same frames: x264 refuses a second pass at a different size / frame rate.
+      ...scale,
+      ...(pass === 2 ? ['-c:a', 'aac', '-b:a', `${audioKbps}k`, '-movflags', '+faststart'] : ['-an']),
       '-f', pass === 1 ? 'null' : 'mp4', dest, '-progress', 'pipe:1', '-nostats', '-loglevel', 'error'];
     const p = spawn(ff, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     job.proc = p;
@@ -478,7 +485,11 @@ ipcMain.handle('compress:start', async (_e, o) => {
   });
 
   const cleanup = () => {
-    for (const f of [log, `${log}-0.log`, `${log}.log`]) try { fs.unlinkSync(f); } catch { /* next */ }
+    // x264 leaves <log>-0.log, <log>-0.log.mbtree and .temp variants of both.
+    const stem = path.basename(log);
+    try {
+      for (const f of fs.readdirSync(path.dirname(log))) if (f.startsWith(stem)) { try { fs.unlinkSync(path.join(path.dirname(log), f)); } catch { /* next */ } }
+    } catch { /* temp dir unreadable */ }
     if (!job.cancelled) return;
     try { fs.unlinkSync(out); } catch { /* partial output */ }
   };

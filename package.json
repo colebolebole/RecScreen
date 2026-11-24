@@ -1,6 +1,6 @@
 {
   "name": "velocity-studio",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Velocity Studio - an OBS-style screen recorder and streamer",
   "main": "main.js",
   "desktopName": "velocity-studio.desktop",

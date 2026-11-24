@@ -109,10 +109,13 @@ jobs:
             [ "v$version" = "$tag" ] || { echo "Tag $tag does not match package.json version $version"; exit 1; }
             case "$tag" in *-*) extra+=(--prerelease) ;; esac
           fi
-          notes=".github/release-notes/$tag.md"
+          # Absolute path: the next step changes directory.
+          notes="$GITHUB_WORKSPACE/.github/release-notes/$tag.md"
           if [ -f "$notes" ]; then extra+=(--notes-file "$notes"); else extra+=(--generate-notes); fi
 
           cd artifacts
+          # GitHub turns spaces in asset names into dots; do it here so SHA256SUMS.txt lists the downloadable names.
+          for f in *' '*; do if [ -e "$f" ]; then mv -- "$f" "${f// /.}"; fi; done
           ls -l
           sha256sum -- * > SHA256SUMS.txt
           if gh release view "$tag" >/dev/null 2>&1; then

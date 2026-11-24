@@ -1,6 +1,7 @@
 // Small UI toolkit: modal dialogs, toasts, context menus, form helpers.
 import { h, $ } from './util.js';
 import { icon } from './icons.js';
+import { staggerMenu } from './motion.js';
 
 /* ---------------- Modal ---------------- */
 export function modal({ title, body, buttons, width = 560, onClose, onOpen, dismissible = true, className = '' }) {
@@ -72,19 +73,111 @@ export async function promptBox(title, label, value = '', okLabel = 'OK') {
   return r === 'ok' ? input.value.trim() : null;
 }
 
-/* ---------------- Toast ---------------- */
-export function toast(message, { kind = 'info', actions = [], timeout = 5000 } = {}) {
-  const root = $('#toast-root');
-  const el = h('div', { class: `toast ${kind}` }, h('span', { class: 'toast-msg' }, message));
-  for (const a of actions) {
-    el.append(h('button', { class: 'toast-act', onclick: () => { a.onClick(); remove(); } }, a.label));
+/* ---------------- Notifications: status-bar ticker + notification center ---------------- */
+const KIND_ICON = { info: 'info', success: 'check', warn: 'alert', error: 'alert' };
+const history = [];
+let unread = 0, panelEl = null, tickerTimer = null;
+
+function badge() {
+  const b = $('#notif-badge');
+  if (!b) return;
+  b.hidden = unread === 0;
+  b.textContent = unread > 9 ? '9+' : String(unread);
+}
+
+function ago(t) {
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 45) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
+function showTicker(entry, timeout) {
+  const el = $('#ticker');
+  if (!el) return;
+  clearTimeout(tickerTimer);
+  el.hidden = false;
+  el.className = entry.kind;
+  el.replaceChildren(
+    h('span', { class: 'tick-ic', html: icon(KIND_ICON[entry.kind] || 'info', 13) }),
+    h('span', { class: 'tick-msg', title: entry.msg }, entry.msg),
+    ...entry.actions.slice(0, 2).map((a) => h('button', { class: 'tick-act', onclick: () => { a.onClick(); dismissTicker(); } }, a.label)),
+    h('button', { class: 'tick-x', title: 'Dismiss', html: icon('close', 11), onclick: () => dismissTicker() }),
+  );
+  el.classList.remove('in');
+  void el.offsetWidth;
+  el.classList.add('in');
+  const arm = () => { if (timeout) tickerTimer = setTimeout(dismissTicker, timeout); };
+  el.onmouseenter = () => clearTimeout(tickerTimer);
+  el.onmouseleave = arm;
+  arm();
+}
+
+function dismissTicker() {
+  clearTimeout(tickerTimer);
+  const el = $('#ticker');
+  if (!el || el.hidden) return;
+  el.classList.add('out');
+  setTimeout(() => { el.hidden = true; el.classList.remove('out', 'in'); }, 200);
+}
+
+function renderPanel() {
+  if (!panelEl) return;
+  const list = panelEl.querySelector('.notif-list');
+  list.replaceChildren();
+  if (!history.length) list.append(h('div', { class: 'notif-empty' }, 'No notifications yet.'));
+  for (const e of history) {
+    list.append(h('div', { class: `notif-item ${e.kind}` },
+      h('span', { class: 'notif-ic', html: icon(KIND_ICON[e.kind] || 'info', 14) }),
+      h('div', { class: 'notif-body' },
+        h('div', { class: 'notif-msg' }, e.msg),
+        h('div', { class: 'notif-meta' }, ago(e.at)),
+        e.actions.length ? h('div', { class: 'notif-acts' }, ...e.actions.map((a) => h('button', { class: 'tick-act', onclick: () => a.onClick() }, a.label))) : null),
+    ));
   }
-  el.append(h('button', { class: 'toast-x', html: icon('close', 14), onclick: () => remove() }));
-  let timer = null;
-  const remove = () => { clearTimeout(timer); el.classList.add('out'); setTimeout(() => el.remove(), 200); };
-  root.append(el);
-  if (timeout) timer = setTimeout(remove, timeout);
-  return remove;
+}
+
+function closePanel() {
+  if (!panelEl) return;
+  const el = panelEl;
+  panelEl = null;
+  el.classList.add('closing');
+  setTimeout(() => el.remove(), 120);
+  document.removeEventListener('pointerdown', outside, true);
+}
+function outside(e) { if (panelEl && !panelEl.contains(e.target) && !e.target.closest('#btn-notifs')) closePanel(); }
+
+function openPanel() {
+  const btn = $('#btn-notifs');
+  const r = btn.getBoundingClientRect();
+  panelEl = h('div', { class: 'notif-panel' },
+    h('div', { class: 'notif-head' }, h('span', {}, 'Notifications'),
+      h('button', { class: 'tick-act', onclick: () => { history.length = 0; renderPanel(); } }, 'Clear all')),
+    h('div', { class: 'notif-list' }));
+  document.body.append(panelEl);
+  const w = panelEl.getBoundingClientRect().width;
+  panelEl.style.left = `${Math.max(6, Math.min(r.right - w, innerWidth - w - 6))}px`;
+  panelEl.style.top = `${r.bottom + 6}px`;
+  unread = 0;
+  badge();
+  renderPanel();
+  setTimeout(() => document.addEventListener('pointerdown', outside, true));
+}
+
+export function initNotifications() {
+  const btn = $('#btn-notifs');
+  if (btn) btn.onclick = () => (panelEl ? closePanel() : openPanel());
+}
+
+/** Non-blocking notification: one line in the status bar, full text + actions in the center. */
+export function toast(message, { kind = 'info', actions = [], timeout = 5000 } = {}) {
+  const entry = { msg: message, kind, actions, at: Date.now() };
+  history.unshift(entry);
+  if (history.length > 30) history.pop();
+  if (panelEl) renderPanel();
+  else { unread++; badge(); }
+  showTicker(entry, timeout);
+  return dismissTicker;
 }
 
 /* ---------------- Context menu ---------------- */
@@ -120,6 +213,7 @@ export function contextMenu(x, y, items, { anchorRight = false } = {}) {
     el.append(row);
   }
   document.body.append(el);
+  staggerMenu(el);
   const r = el.getBoundingClientRect();
   let px = anchorRight ? x - r.width : x;
   let py = y;

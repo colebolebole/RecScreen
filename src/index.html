@@ -28,6 +28,8 @@
     <nav id="menubar" aria-label="Main menu"></nav>
     <span class="spacer"></span>
     <div class="title-actions">
+      <button class="icon-btn" id="btn-notifs" title="Notifications" data-icon="bell" data-size="16"><span id="notif-badge" hidden></span></button>
+      <span class="title-sep"></span>
       <button class="icon-btn panel-toggle" id="btn-toggle-left" title="Show / hide scenes and sources" data-icon="panel-left" data-size="16"></button>
       <button class="icon-btn panel-toggle" id="btn-toggle-right" title="Show / hide audio mixer" data-icon="panel-right" data-size="16"></button>
       <span class="title-sep"></span>
@@ -76,6 +78,7 @@
     <section id="preview-area" aria-label="Preview">
       <div id="stage">
         <canvas id="program"></canvas>
+        <div id="scene-veil"></div>
         <div id="guide-v" class="guide v"></div>
         <div id="guide-h" class="guide h"></div>
         <div id="sel"></div>
@@ -99,11 +102,38 @@
       </div>
       <div id="pv-chip" aria-hidden="true"></div>
       <div id="transport" role="toolbar" aria-label="Recording and streaming controls">
-        <button class="btn big stream" id="btn-stream" title="Start / stop streaming"></button>
-        <button class="btn big rec" id="btn-record" title="Start / stop recording"></button>
-        <span class="transport-sep"></span>
-        <button class="btn transport-icon" id="btn-pause" title="Pause / resume recording" disabled></button>
-        <button class="btn transport-icon" id="btn-shot" title="Take screenshot" aria-label="Take screenshot"><span data-icon="shot" data-size="18"></span></button>
+        <div class="transport-main">
+          <button class="btn big stream" id="btn-stream" title="Start / stop streaming"></button>
+          <button class="btn big rec" id="btn-record" title="Start / stop recording"></button>
+          <span class="transport-sep"></span>
+          <button class="btn transport-icon" id="btn-pause" title="Pause / resume recording" disabled></button>
+          <button class="btn transport-icon" id="btn-shot" title="Take screenshot" aria-label="Take screenshot"><span data-icon="shot" data-size="18"></span></button>
+        </div>
+        <div id="compress-sec" aria-label="Compress the last recording">
+          <div class="cmp-inner">
+            <div class="cmp-idle">
+              <span class="cmp-ic" data-icon="compress" data-size="15"></span>
+              <div class="cmp-head"><b>Compress</b><span>for sharing</span></div>
+              <div class="cmp-presets">
+                <button class="cmp-chip" data-mb="10" title="Compress to just under 10 MB"><b>10<i>MB</i></b><span>smallest</span></button>
+                <button class="cmp-chip" data-mb="20" title="Compress to just under 20 MB"><b>20<i>MB</i></b><span>balanced</span></button>
+                <button class="cmp-chip" data-mb="50" title="Compress to just under 50 MB"><b>50<i>MB</i></b><span>best quality</span></button>
+              </div>
+              <button class="mini-btn cmp-x" title="Dismiss" data-icon="close" data-size="13"></button>
+            </div>
+            <div class="cmp-busy" hidden>
+              <div class="cmp-v"></div>
+              <div class="cmp-status"><b class="cmp-phase">Compressing</b><span class="cmp-pct">0%</span></div>
+              <button class="mini-btn cmp-cancel" title="Cancel compression" data-icon="close" data-size="13"></button>
+            </div>
+            <div class="cmp-done" hidden>
+              <span class="cmp-done-ic" data-icon="check" data-size="14"></span>
+              <div class="cmp-status"><b class="cmp-done-bytes"></b><span class="cmp-done-sub"></span></div>
+              <button class="btn small cmp-show" type="button">Show</button>
+              <button class="mini-btn cmp-x2" title="Dismiss" data-icon="close" data-size="13"></button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -125,6 +155,7 @@
 
   <footer id="statusbar">
     <span class="st" id="st-enc"></span>
+    <div id="ticker" hidden></div>
     <span class="spacer"></span>
     <span class="st" id="st-res"></span>
     <span class="st" id="st-fps"></span>
@@ -133,7 +164,6 @@
   </footer>
 
   <div id="modal-root"></div>
-  <div id="toast-root"></div>
 
   <script type="module" src="js/app.js"></script>
 </body>

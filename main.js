@@ -412,6 +412,94 @@ ipcMain.handle('ffmpeg:remove', (_e, which) => {
   return true;
 });
 
+/* ---- Share compression: two-pass x264 aimed just under a target size ---- */
+let compressJob = null; // { id, proc, cancelled, out, log }
+
+function probeDuration(ff, input) {
+  return new Promise((resolve) => {
+    const p = spawn(ff, ['-hide_banner', '-i', input], { windowsHide: true });
+    let err = '';
+    p.stderr.on('data', (d) => { err += d; });
+    p.on('error', () => resolve(0));
+    p.on('close', () => {
+      const m = err.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+      resolve(m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : 0);
+    });
+  });
+}
+
+ipcMain.handle('compress:start', async (_e, o) => {
+  if (compressJob) return { ok: false, error: 'A compression is already running.' };
+  const ff = ffmpegPath();
+  if (!ff) return { ok: false, error: 'ffmpeg is not installed. Download it in Settings → Output.' };
+  const { input, targetMB, id } = o;
+  let bytes = 0;
+  try { bytes = fs.statSync(input).size; } catch { return { ok: false, error: 'The recording file is gone.' }; }
+  const limit = targetMB * 1048576;
+  if (bytes <= limit) return { ok: true, already: true, path: input, bytes };
+  const duration = await probeDuration(ff, input);
+  if (!duration) return { ok: false, error: 'Could not read the recording duration.' };
+
+  const audioKbps = 128;
+  // 96% of the target leaves room for container overhead; audio gets a fixed slice.
+  const videoKbps = Math.max(120, Math.floor((limit * 8 * 0.96) / duration / 1000 - audioKbps));
+  // Low bitrates look better (and encode much faster) at 720p30 than at a starved 1080p60.
+  const scale = videoKbps < 1800 ? ['-vf', 'scale=-2:720', '-r', '30'] : [];
+  const base = input.replace(/\.[^.]+$/, '');
+  let out = `${base}.compressed-${targetMB}mb.mp4`;
+  for (let i = 2; fs.existsSync(out); i++) out = `${base}.compressed-${targetMB}mb-${i}.mp4`;
+  const log = path.join(os.tmpdir(), `velocity-compress-${id}`);
+  const job = { id, cancelled: false, out, log, proc: null };
+  compressJob = job;
+
+  const runPass = (pass, dest) => new Promise((resolve) => {
+    const args = ['-y', '-i', input, '-c:v', 'libx264', '-preset', 'veryfast', '-b:v', `${videoKbps}k`,
+      '-pass', String(pass), '-passlogfile', log, '-sn', '-dn',
+      ...(pass === 2 ? [...scale, '-c:a', 'aac', '-b:a', `${audioKbps}k`, '-movflags', '+faststart'] : ['-an']),
+      '-f', pass === 1 ? 'null' : 'mp4', dest, '-progress', 'pipe:1', '-nostats', '-loglevel', 'error'];
+    const p = spawn(ff, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    job.proc = p;
+    let errTail = '', buf = '';
+    p.stderr.on('data', (d) => { errTail = (errTail + d).slice(-600); });
+    p.stdout.on('data', (d) => {
+      buf = (buf + d).slice(-400);
+      const ms = [...buf.matchAll(/out_time_(?:us|ms)=(\d+)/g)];
+      if (ms.length) {
+        const frac = Math.min(1, Number(ms[ms.length - 1][1]) / 1e6 / duration);
+        const pct = pass === 1 ? frac * 0.45 : 0.45 + frac * 0.55;
+        if (win && !win.isDestroyed()) win.webContents.send('compress:progress', { id, pct, phase: pass });
+      }
+    });
+    p.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+    p.on('close', (code) => resolve(code === 0 ? { ok: true } : {
+      ok: false,
+      error: job.cancelled ? 'cancelled' : (errTail.trim().split('\n').pop() || `ffmpeg exited with ${code}`),
+    }));
+  });
+
+  const cleanup = () => {
+    for (const f of [log, `${log}-0.log`, `${log}.log`]) try { fs.unlinkSync(f); } catch { /* next */ }
+    if (!job.cancelled) return;
+    try { fs.unlinkSync(out); } catch { /* partial output */ }
+  };
+  const r1 = await runPass(1, IS_WIN ? 'NUL' : '/dev/null');
+  if (!r1.ok) { compressJob = null; cleanup(); return job.cancelled ? { ok: false, cancelled: true } : r1; }
+  const r2 = await runPass(2, out);
+  compressJob = null;
+  cleanup();
+  if (job.cancelled) return { ok: false, cancelled: true };
+  if (!r2.ok) { try { fs.unlinkSync(out); } catch { /* partial */ } return r2; }
+  try { return { ok: true, path: out, bytes: fs.statSync(out).size }; }
+  catch { return { ok: false, error: 'The compressed file is missing.' }; }
+});
+
+ipcMain.on('compress:cancel', (_e, id) => {
+  if (compressJob && compressJob.id === id) {
+    compressJob.cancelled = true;
+    try { compressJob.proc.kill(); } catch { /* already gone */ }
+  }
+});
+
 const familyOf = (ffCodec) => (/_nvenc$/.test(ffCodec) ? 'nvenc' : /_amf$/.test(ffCodec) ? 'amf' : /_qsv$/.test(ffCodec) ? 'qsv' : ffCodec === 'libx265' ? 'x265' : 'x264');
 const pick = (v, allowed, def) => (allowed.includes(v) ? v : def);
 const PRESETS = {

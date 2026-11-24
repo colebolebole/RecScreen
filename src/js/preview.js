@@ -3,6 +3,7 @@ import { emit, save, activeScene, selectedItem, BASE_W, BASE_H } from './store.j
 import { $, clamp } from './util.js';
 import { getRes } from './resources.js';
 import { selectItem, editSource, nudge, removeItem } from './actions.js';
+import { reduced, SPRING } from './motion.js';
 
 const stage = $('#stage');
 const area = $('#preview-area');
@@ -55,15 +56,23 @@ export function layout() {
   updateOverlay();
 }
 
+let lastSelId = null;
 export function updateOverlay() {
   const it = selectedItem();
-  if (!it || !it.visible) { sel.style.display = 'none'; return; }
+  if (!it || !it.visible) { sel.style.display = 'none'; lastSelId = null; return; }
   sel.style.display = 'block';
   sel.style.left = `${it.x * k}px`;
   sel.style.top = `${it.y * k}px`;
   sel.style.width = `${it.w * k}px`;
   sel.style.height = `${it.h * k}px`;
   sel.classList.toggle('locked', it.locked);
+  if (it.id !== lastSelId) {
+    lastSelId = it.id;
+    if (!reduced && !it.locked) sel.querySelectorAll('.handle').forEach((hd, i) => {
+      hd.animate([{ transform: 'translate(-50%, -50%) scale(0)' }, { transform: 'translate(-50%, -50%) scale(1)' }],
+        { duration: 280, delay: i * 16, easing: SPRING, fill: 'backwards' });
+    });
+  }
 }
 
 function toBase(e) {

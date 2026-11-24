@@ -36,6 +36,11 @@ const P = {
   scenes: '<rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8 21h8"/>',
   'panel-left': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9.5 4v16"/>',
   'panel-right': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14.5 4v16"/>',
+  keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/>',
+  compress: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/>',
+  bell: '<path d="M18 9a6 6 0 10-12 0c0 5-2 6-2 6h16s-2-1-2-6M10.3 19a2 2 0 003.4 0"/>',
+  alert: '<path d="M12 3L2.5 20h19z"/><path d="M12 9.5v4.5M12 17.2h.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8h.01"/>',
 };
 
 export function icon(name, size = 16) {

@@ -15,6 +15,7 @@ export function initVBounce() {
   let size = 90, x = 0, y = 0, vx = 0, vy = 0;
   let q = 0, qv = 0, axis = 'y';       // squash spring
   let tilt = 0, tv = 0;                // wobble spring
+  let spin = 0, spinV = 0, spinTarget = 0; // click spin spring
   let raf = 0, last = 0, active = false, seeded = false;
   let lastBounceX = 0, lastBounceY = 0;
   const hist = [];
@@ -35,6 +36,28 @@ export function initVBounce() {
     seeded = true;
   }
 
+  function ring(bright) {
+    const r = document.createElement('div');
+    r.className = `vb-ripple${bright ? ' bright' : ''}`;
+    r.style.left = `${x}px`;
+    r.style.top = `${y}px`;
+    root.append(r);
+    r.addEventListener('animationend', () => r.remove());
+  }
+
+  // Click the V: it shines and whips around itself with a springy overshoot.
+  lead.addEventListener('click', () => {
+    if (!active) return;
+    root.classList.remove('shine');
+    void root.offsetWidth;
+    root.classList.add('shine');
+    setTimeout(() => root.classList.remove('shine'), 800);
+    ring(true);
+    if (reduced) return;
+    spinTarget += 360;
+    qv += 3;
+  });
+
   function kick(speed, ax, now) {
     axis = ax;
     qv += clamp(speed * 0.02, 1.5, 5.5);
@@ -47,6 +70,7 @@ export function initVBounce() {
       root.classList.add('corner');
       tv += rand(-260, 260);
       setTimeout(() => root.classList.remove('corner'), 700);
+      ring(false);
     }
   }
 
@@ -71,14 +95,16 @@ export function initVBounce() {
     qv += (-230 * q - 10 * qv) * dt; q += qv * dt;
     const lean = clamp(vx * 0.03, -10, 10);
     tv += (-140 * (tilt - lean) - 9 * tv) * dt; tilt += tv * dt;
+    spinV += (-90 * (spin - spinTarget) - 9 * spinV) * dt; spin += spinV * dt;
+    const rot = tilt + spin;
 
     const st = 0.05; // slight stretch along the travel direction
     let sx = axis === 'x' ? 1 - q : 1 + q;
     let sy = axis === 'x' ? 1 + q : 1 - q;
     if (Math.abs(vy) > Math.abs(vx)) { sy += st; sx -= st * 0.6; } else { sx += st; sy -= st * 0.6; }
 
-    place(lead, x, y, tilt, sx, sy);
-    hist.push({ x, y, tilt });
+    place(lead, x, y, rot, sx, sy);
+    hist.push({ x, y, tilt: rot });
     if (hist.length > 24) hist.shift();
     ghosts.forEach((g, i) => {
       const p = hist[Math.max(0, hist.length - 1 - (i + 1) * 6)];

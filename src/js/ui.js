@@ -2,7 +2,7 @@
 import { state, on, activeScene, selectedItem } from './store.js';
 import { $, h, fmtTime, fmtBytes } from './util.js';
 import { icon } from './icons.js';
-import { contextMenu, closeMenu } from './widgets.js';
+import { contextMenu, closeMenu, initNotifications } from './widgets.js';
 import { KINDS, kindInfo } from './source-dialog.js';
 import * as A from './actions.js';
 import * as audio from './audio.js';
@@ -13,8 +13,9 @@ import * as stream from './stream.js';
 import { getRes } from './resources.js';
 import { openSettings, openShortcuts, openAbout } from './settings.js';
 import { initVBounce } from './vbounce.js';
+import { initCompress } from './compress.js';
+import { flipList, swapHTML, reduced } from './motion.js';
 
-const stagger = (el, i) => { el.classList.add('row-in'); el.style.animationDelay = `${Math.min(i * 26, 220)}ms`; };
 function countPop(el, text) {
   if (el.textContent === text) return;
   el.textContent = text;
@@ -28,28 +29,30 @@ const keyHint = (k) => (k ? `<kbd>${prettyKey(k).replace(/[&<>"']/g, (c) => `&#$
 
 /* ===================== Scenes dock ===================== */
 function renderScenes() {
-  const list = $('#scene-list');
   countPop($('#scene-count'), String(state.scenes.length));
-  list.replaceChildren();
-  for (const sc of state.scenes) {
-    const row = h('div', {
-      class: `row-item ${sc.id === state.activeSceneId ? 'active' : ''}`,
-      tabindex: 0,
-      onclick: () => A.activateScene(sc.id),
-      ondblclick: () => A.renameScene(sc),
-      oncontextmenu: (e) => {
-        e.preventDefault();
-        contextMenu(e.clientX, e.clientY, [
-          { label: 'Rename', icon: 'edit', onClick: () => A.renameScene(sc) },
-          { label: 'Duplicate', icon: 'copy', onClick: () => A.duplicateScene(sc) },
-          { separator: true },
-          { label: 'Remove', onClick: () => A.removeScene(sc) },
-        ]);
-      },
-    }, h('span', { class: 'row-label' }, sc.name), h('span', { class: 'row-badge' }, String(sc.items.length)));
-    stagger(row, list.children.length);
-    list.append(row);
-  }
+  const list = $('#scene-list');
+  flipList(list, () => {
+    list.replaceChildren();
+    for (const sc of state.scenes) {
+      const row = h('div', {
+        class: `row-item ${sc.id === state.activeSceneId ? 'active' : ''}`,
+        dataset: { flipKey: sc.id },
+        tabindex: 0,
+        onclick: () => A.activateScene(sc.id),
+        ondblclick: () => A.renameScene(sc),
+        oncontextmenu: (e) => {
+          e.preventDefault();
+          contextMenu(e.clientX, e.clientY, [
+            { label: 'Rename', icon: 'edit', onClick: () => A.renameScene(sc) },
+            { label: 'Duplicate', icon: 'copy', onClick: () => A.duplicateScene(sc) },
+            { separator: true },
+            { label: 'Remove', onClick: () => A.removeScene(sc) },
+          ]);
+        },
+      }, h('span', { class: 'row-label' }, sc.name), h('span', { class: 'row-badge' }, String(sc.items.length)));
+      list.append(row);
+    }
+  });
 }
 
 /* ===================== Sources dock ===================== */
@@ -57,19 +60,20 @@ function renderSources() {
   const list = $('#source-list');
   const sc = activeScene();
   countPop($('#source-count'), sc && sc.items.length ? String(sc.items.length) : '');
-  list.replaceChildren();
   const emptyStage = $('#stage-empty');
   if (emptyStage) emptyStage.classList.toggle('show', !sc || !sc.items.length);
-  if (!sc || !sc.items.length) {
-    list.append(h('div', { class: 'empty-hint' }, h('div', { html: icon('plus', 22) }), h('div', {}, 'No sources'), h('small', {}, 'Click + below to add a display, window or webcam.')));
-    return;
-  }
-  for (const it of [...sc.items].reverse()) {
-    const res = getRes(it);
-    const err = res && res.status === 'error';
-    const row = h('div', {
-      class: `row-item source-row ${it.id === state.selectedItemId ? 'active' : ''} ${it.visible ? '' : 'dim'}`,
-      dataset: { id: it.id },
+  flipList(list, () => {
+    list.replaceChildren();
+    if (!sc || !sc.items.length) {
+      list.append(h('div', { class: 'empty-hint' }, h('div', { html: icon('plus', 22) }), h('div', {}, 'No sources'), h('small', {}, 'Click + below to add a display, window or webcam.')));
+      return;
+    }
+    for (const it of [...sc.items].reverse()) {
+      const res = getRes(it);
+      const err = res && res.status === 'error';
+      const row = h('div', {
+        class: `row-item source-row ${it.id === state.selectedItemId ? 'active' : ''} ${it.visible ? '' : 'dim'}`,
+        dataset: { id: it.id, flipKey: it.id },
       tabindex: 0,
       onclick: () => A.selectItem(it.id),
       ondblclick: () => A.editSource(it),
@@ -80,9 +84,9 @@ function renderSources() {
     err ? h('span', { class: 'row-warn', title: res.error, html: '!' }) : null,
     h('button', { class: `mini-btn ${it.visible ? '' : 'off'}`, title: it.visible ? 'Hide' : 'Show', html: icon(it.visible ? 'eye' : 'eyeoff', 15), onclick: (e) => { e.stopPropagation(); A.toggleVisible(it); } }),
     h('button', { class: `mini-btn ${it.locked ? 'on' : 'off'}`, title: it.locked ? 'Unlock' : 'Lock', html: icon(it.locked ? 'lock' : 'unlock', 15), onclick: (e) => { e.stopPropagation(); A.toggleLock(it); } }));
-    stagger(row, list.children.length);
-    list.append(row);
-  }
+      list.append(row);
+    }
+  });
 }
 
 function highlightSelection() {
@@ -129,9 +133,10 @@ const meters = new Map(); // channel id -> { canvas, dbEl, row }
 function renderMixer() {
   const list = $('#mixer-list');
   countPop($('#mixer-count'), state.audio.length ? String(state.audio.length) : '');
-  list.replaceChildren();
-  meters.clear();
-  for (const ch of state.audio) {
+  flipList(list, () => {
+    list.replaceChildren();
+    meters.clear();
+    for (const ch of state.audio) {
     const dbEl = h('span', { class: 'ch-db' }, fmtDb(ch.volumeDb));
     const canvas = h('canvas', { class: 'meter', height: 12 });
     const slider = h('input', { type: 'range', class: 'fader', min: -60, max: 12, step: 0.5, value: ch.volumeDb });
@@ -158,16 +163,15 @@ function renderMixer() {
         ], { anchorRight: true });
       },
     });
-    const row = h('div', { class: `mixer-ch ${ch.muted ? 'muted' : ''}` },
+    const row = h('div', { class: `mixer-ch ${ch.muted ? 'muted' : ''}`, dataset: { flipKey: ch.id } },
       h('div', { class: 'ch-top' }, h('span', { class: 'ch-name', title: ch.name }, ch.name), dbEl),
       statusEl,
       canvas,
       h('div', { class: 'ch-ctrl' }, muteBtn, slider, gear));
-    row.classList.add('row-in');
-    row.style.animationDelay = `${Math.min(list.children.length * 40, 240)}ms`;
     list.append(row);
-    meters.set(ch.id, { canvas, row, cfg: ch, statusEl, err: null });
-  }
+    meters.set(ch.id, { canvas, row, cfg: ch, statusEl, err: null, sm: [0, 0] });
+    }
+  });
 }
 
 const fmtDb = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`;
@@ -200,9 +204,17 @@ function drawMeters() {
       const y = Math.floor(i * (barH + dpr));
       g.fillStyle = '#0f1e24';
       g.fillRect(0, y, w, barH);
-      if (lv.ok && !m.cfg.muted) {
+      // Fast attack, slow release — meters glide instead of jittering.
+      const target = lv.ok && !m.cfg.muted ? dbPos(lv.peak[i]) : 0;
+      m.sm[i] = target > m.sm[i] ? target : m.sm[i] + (target - m.sm[i]) * 0.16;
+      const fillW = Math.floor(w * m.sm[i]);
+      if (fillW > 0) {
         g.fillStyle = grad;
-        g.fillRect(0, y, Math.floor(w * dbPos(lv.peak[i])), barH);
+        g.fillRect(0, y, fillW, barH);
+        g.fillStyle = 'rgba(233, 251, 255, .9)';
+        g.fillRect(Math.max(0, fillW - Math.ceil(dpr * 1.5)), y, Math.ceil(dpr * 1.5), barH);
+      }
+      if (lv.ok && !m.cfg.muted) {
         const hx = Math.floor(w * dbPos(lv.hold[i]));
         if (hx > 2) { g.fillStyle = '#e3f1f5'; g.fillRect(hx - Math.ceil(dpr), y, Math.ceil(dpr * 1.5), barH); }
       }
@@ -214,25 +226,31 @@ function drawMeters() {
 }
 
 /* ===================== Controls dock ===================== */
+let lastRecPhase = null;
 function updateControls(detail = {}) {
   const phase = recorder.rec.phase;
+  const phaseChanged = phase !== lastRecPhase;
+  lastRecPhase = phase;
   const recBtn = $('#btn-record');
   const pauseBtn = $('#btn-pause');
   const busy = phase === 'processing';
   recBtn.classList.toggle('recording', phase === 'recording' || phase === 'paused');
   recBtn.disabled = busy;
   if (busy) recBtn.innerHTML = `<span class="spin"></span><span>Processing ${detail.pct != null ? `${detail.pct}%` : '…'}</span>`;
-  else recBtn.innerHTML = (phase === 'idle' ? icon('record', 18) : icon('stop', 18)) + `<span>${phase === 'idle' ? 'Start Recording' : 'Stop Recording'}</span>` + keyHint(state.settings.hotkeys.record);
+  else swapHTML(recBtn, (phase === 'idle' ? icon('record', 18) : icon('stop', 18)) + `<span>${phase === 'idle' ? 'Start Recording' : 'Stop Recording'}</span>` + keyHint(state.settings.hotkeys.record), phaseChanged);
   pauseBtn.disabled = !(phase === 'recording' || phase === 'paused');
-  pauseBtn.innerHTML = (phase === 'paused' ? icon('play', 16) : icon('pause', 16)) + `<span>${phase === 'paused' ? 'Resume Recording' : 'Pause Recording'}</span>`;
+  swapHTML(pauseBtn, (phase === 'paused' ? icon('play', 16) : icon('pause', 16)) + `<span>${phase === 'paused' ? 'Resume Recording' : 'Pause Recording'}</span>`, phaseChanged);
   $('#rec-dot').className = `rec-dot ${phase}`;
   $('#rec-label').textContent = { idle: 'Ready', recording: 'REC', paused: 'PAUSED', processing: 'Processing…' }[phase];
   document.body.classList.toggle('is-recording', phase === 'recording');
   document.body.classList.toggle('is-active-rec', phase === 'recording' || phase === 'paused');
 }
 
+let lastStreamPhase = null;
 function updateStreamControls() {
   const phase = stream.st.phase;
+  const phaseChanged = phase !== lastStreamPhase;
+  lastStreamPhase = phase;
   const btn = $('#btn-stream');
   const live = phase === 'live';
   const busy = phase === 'connecting' || phase === 'reconnecting' || phase === 'stopping';
@@ -243,7 +261,7 @@ function updateStreamControls() {
     idle: 'Start Streaming', connecting: 'Connecting… (cancel)', live: 'Stop Streaming',
     reconnecting: `Reconnecting… (${stream.st.attempt})`, stopping: 'Stopping…',
   }[phase];
-  btn.innerHTML = (phase === 'idle' || busy ? icon('stream', 18) : icon('stop', 18)) + `<span>${label}</span>` + (phase === 'idle' ? keyHint(state.settings.hotkeys.stream) : '');
+  swapHTML(btn, (phase === 'idle' || busy ? icon('stream', 18) : icon('stop', 18)) + `<span>${label}</span>` + (phase === 'idle' ? keyHint(state.settings.hotkeys.stream) : ''), phaseChanged);
   $('#live-badge').hidden = phase === 'idle';
   $('#live-label').textContent = live ? 'LIVE' : phase === 'reconnecting' ? 'RECONNECTING' : phase === 'stopping' ? 'STOPPING' : 'CONNECTING';
   $('#live-dot').className = `rec-dot ${phase === 'reconnecting' ? 'reconnecting' : 'live'}`;
@@ -370,6 +388,12 @@ export function init() {
   document.querySelectorAll('[data-icon]').forEach((el) => { el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon, Number(el.dataset.size) || 16)); });
 
   on('scenes', renderScenes);
+  let lastSceneId = state.activeSceneId;
+  on('scenes', () => {
+    if (state.activeSceneId === lastSceneId) return;
+    lastSceneId = state.activeSceneId;
+    if (!reduced) $('#scene-veil').animate([{ opacity: 0 }, { opacity: 0.45, offset: 0.35 }, { opacity: 0 }], { duration: 320, easing: 'ease-out' });
+  });
   on('items', () => { renderSources(); renderScenes(); });
   on('selection', highlightSelection);
   on('audio', renderMixer);
@@ -383,6 +407,8 @@ export function init() {
   setupMenus();
   setupPanels();
   initVBounce();
+  initCompress();
+  initNotifications();
   requestAnimationFrame(drawMeters);
   pollStats();
   setInterval(pollStats, 1500);
@@ -397,4 +423,6 @@ export function init() {
   }, 1000);
   document.addEventListener('contextmenu', (e) => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+  window.addEventListener('blur', () => document.body.classList.add('unfocused'));
+  window.addEventListener('focus', () => document.body.classList.remove('unfocused'));
 }

@@ -23,8 +23,11 @@ export async function applyHotkeys() {
 }
 
 /** A titled group of fields inside a settings pane. */
+const SECTION_ICONS = { Encoder: 'gauge', File: 'folder', Canvas: 'display', 'Mixer sources': 'mic', Encoding: 'sliders', 'Global hotkeys': 'keyboard', Behavior: 'gear', Reset: 'refresh', Destination: 'stream', Quality: 'gauge' };
 function section(title, ...children) {
-  return h('section', { class: 'set-section' }, h('h3', { class: 'set-title' }, title), ...children);
+  return h('section', { class: 'set-section' },
+    h('h3', { class: 'set-title' }, h('span', { class: 'set-ic', html: icon(SECTION_ICONS[title] || 'gear', 12) }), title),
+    ...children);
 }
 
 /** Range slider with a filled track and a live value readout. Returns the wrapper (with .setValue()). */
@@ -195,9 +198,10 @@ export function openSettings() {
   const fpsSel = select([24, 30, 48, 60].map((f) => ({ value: f, label: `${f} fps` })), d.fps, (v) => { d.fps = Number(v); });
   if (locked) { resSel.disabled = true; fpsSel.disabled = true; }
   const video = h('div', { class: 'pane' },
-    h('div', { class: 'grid2' }, field('Output resolution', resSel), field('Frame rate', fpsSel)),
-    locked ? h('p', { class: 'note warn' }, 'Stop recording and streaming to change the resolution or frame rate.') : null,
-    h('p', { class: 'note' }, 'Scenes are laid out on a 16:9 canvas and scaled to the output resolution. Higher resolution and frame rate use more CPU/GPU. If the status bar shows fewer fps than selected, lower one of them or the bitrate.'),
+    section('Canvas',
+      h('div', { class: 'grid2' }, field('Output resolution', resSel), field('Frame rate', fpsSel)),
+      locked ? h('p', { class: 'note warn' }, 'Stop recording and streaming to change the resolution or frame rate.') : null,
+      h('p', { class: 'note' }, 'Scenes are laid out on a 16:9 canvas and scaled to the output resolution. Higher resolution and frame rate use more CPU/GPU. If the status bar shows fewer fps than selected, lower one of them or the bitrate.')),
   );
 
   /* ---- Audio ---- */
@@ -219,10 +223,10 @@ export function openSettings() {
     }
   }).catch(() => {});
   const audioPane = h('div', { class: 'pane' },
-    h('div', { class: 'field-label strong' }, 'Mixer sources'),
-    chRows,
-    h('p', { class: 'note' }, 'Pick a microphone or any other capture device per channel. “System audio” records everything you hear through the Windows default output device. To capture a different output or a single app, route it through a virtual audio cable (e.g. VB-Cable or Voicemeeter) and choose that cable here as a device. Add more channels with + in the Audio Mixer.'),
-    field('Recording audio bitrate', abSel),
+    section('Mixer sources',
+      chRows,
+      h('p', { class: 'note' }, 'Pick a microphone or any other capture device per channel. “System audio” records everything you hear through the Windows default output device. To capture a different output or a single app, route it through a virtual audio cable (e.g. VB-Cable or Voicemeeter) and choose that cable here as a device. Add more channels with + in the Audio Mixer.')),
+    section('Encoding', field('Recording audio bitrate', abSel)),
   );
 
   /* ---- Hotkeys ---- */
@@ -249,20 +253,24 @@ export function openSettings() {
     });
     return h('div', { class: 'hk-row' }, h('span', {}, label), btn, clear);
   });
-  const hotkeys = h('div', { class: 'pane' }, ...hkRows,
-    h('p', { class: 'note' }, 'Hotkeys work globally, even while Velocity Studio is minimized or another app has focus.'));
+  const hotkeys = h('div', { class: 'pane' },
+    section('Global hotkeys', ...hkRows,
+      h('p', { class: 'note' }, 'Hotkeys work globally, even while Velocity Studio is minimized or another app has focus.')),
+  );
 
   /* ---- General ---- */
   const general = h('div', { class: 'pane' },
-    checkbox('Hide Velocity Studio from screen captures', d.hideFromCapture, (v) => { d.hideFromCapture = v; }),
-    h('p', { class: 'note' }, 'Excludes this window from display/window capture so it never shows up in your recordings (no infinite-mirror effect).'),
-    checkbox('Minimize Velocity Studio when recording starts', d.minimizeOnRecord, (v) => { d.minimizeOnRecord = v; }),
-    h('p', { class: 'note' }, 'Use the Start/Stop hotkey to control recording while minimized.'),
-    h('div', { class: 'row' }, h('button', {
-      class: 'btn',
-      type: 'button',
-      onclick: () => { Object.assign(d, deepClone(DEFAULT_SETTINGS), { recPath: d.recPath }); toast('Settings reset. Press Apply to keep them.', { kind: 'warn' }); },
-    }, 'Reset to defaults')),
+    section('Behavior',
+      checkbox('Hide Velocity Studio from screen captures', d.hideFromCapture, (v) => { d.hideFromCapture = v; }),
+      h('p', { class: 'note' }, 'Excludes this window from display/window capture so it never shows up in your recordings (no infinite-mirror effect).'),
+      checkbox('Minimize Velocity Studio when recording starts', d.minimizeOnRecord, (v) => { d.minimizeOnRecord = v; }),
+      h('p', { class: 'note' }, 'Use the Start/Stop hotkey to control recording while minimized.')),
+    section('Reset',
+      h('div', { class: 'row tight' }, h('button', {
+        class: 'btn',
+        type: 'button',
+        onclick: () => { Object.assign(d, deepClone(DEFAULT_SETTINGS), { recPath: d.recPath }); toast('Settings reset. Press Apply to keep them.', { kind: 'warn' }); },
+      }, 'Reset to defaults'))),
   );
 
   /* ---- Stream ---- */
@@ -311,44 +319,62 @@ export function openSettings() {
   syncStreamPreset();
   if (streaming) [sBitrate, sAudio, sHeight, sFps, sEnc, sPreset].forEach((el) => { el.disabled = true; });
   const streamPane = h('div', { class: 'pane' },
-    field('Service', svcSel),
-    hint,
-    field('Server', serverIn),
-    field('Stream key', h('div', { class: 'row' }, keyIn, showBtn)),
-    rememberCb, secretNote,
-    h('div', { class: 'grid2' }, field('Video bitrate (kbps, CBR)', sBitrate), field('Audio bitrate', sAudio)),
-    h('div', { class: 'grid2' }, field('Stream resolution', sHeight), field('Stream frame rate', sFps)),
-    h('div', { class: 'grid2' }, field('Encoder', sEnc), h('div', {}, h('div', { class: 'field-label' }, 'Connection'), checkbox('Reconnect automatically', sc.reconnect, (v) => { sc.reconnect = v; }))),
-    sPresetBox,
-    streaming ? h('p', { class: 'note warn' }, 'Stop streaming to change bitrate, resolution or encoder.') : null,
-    h('p', { class: 'note' }, 'Keyframes are sent every 2 seconds, as Twitch, YouTube and Kick require. Streaming and recording can run at the same time; with a GPU encoder both share one GPU conversion.'),
+    section('Destination',
+      field('Service', svcSel),
+      hint,
+      field('Server', serverIn),
+      field('Stream key', h('div', { class: 'row tight' }, keyIn, showBtn)),
+      rememberCb, secretNote),
+    section('Quality',
+      h('div', { class: 'grid2' }, field('Video bitrate (kbps, CBR)', sBitrate), field('Audio bitrate', sAudio)),
+      h('div', { class: 'grid2' }, field('Stream resolution', sHeight), field('Stream frame rate', sFps)),
+      h('div', { class: 'grid2' }, field('Encoder', sEnc), h('div', {}, h('div', { class: 'field-label' }, 'Connection'), checkbox('Reconnect automatically', sc.reconnect, (v) => { sc.reconnect = v; }))),
+      sPresetBox,
+      streaming ? h('p', { class: 'note warn' }, 'Stop streaming to change bitrate, resolution or encoder.') : null,
+      h('p', { class: 'note' }, 'Keyframes are sent every 2 seconds, as Twitch, YouTube and Kick require. Streaming and recording can run at the same time; with a GPU encoder both share one GPU conversion.')),
   );
   refreshService();
 
   const tabs = [['Output', out], ['Video', video], ['Audio', audioPane], ['Stream', streamPane], ['Hotkeys', hotkeys], ['General', general]];
+  const TAB_ICONS = { Output: 'gauge', Video: 'display', Audio: 'sliders', Stream: 'stream', Hotkeys: 'keyboard', General: 'gear' };
   const nav = h('div', { class: 'tabs-nav' });
+  const ind = h('span', { class: 'tab-ind', 'aria-hidden': 'true' });
+  nav.append(ind);
   const content = h('div', { class: 'tabs-content' });
   const buttons = [];
+  let curTab = 0;
+  const placeInd = () => {
+    const b = buttons[curTab];
+    if (!b || !b.offsetHeight) return;
+    ind.style.height = `${b.offsetHeight}px`;
+    ind.style.transform = `translateY(${b.offsetTop}px)`;
+  };
   tabs.forEach(([name, pane], i) => {
     const b = h('button', { class: `tab-btn ${i === 0 ? 'active' : ''}`, type: 'button', onclick: () => {
       if (b.classList.contains('active')) return;
+      const dir = i > curTab ? 1 : -1;
+      curTab = i;
       buttons.forEach((x) => x.classList.remove('active')); b.classList.add('active');
+      placeInd();
       tabs.forEach(([, p]) => { p.style.display = 'none'; p.classList.remove('pane-in'); });
       pane.style.display = '';
+      pane.style.setProperty('--pane-dir', `${dir * 16}px`);
       void pane.offsetWidth; // restart the entrance animation
       pane.classList.add('pane-in');
       content.scrollTop = 0;
-    } }, name);
+    } }, h('span', { class: 'tab-ic', html: icon(TAB_ICONS[name], 15) }), name);
     buttons.push(b); nav.append(b);
     pane.style.display = i === 0 ? '' : 'none';
     content.append(pane);
   });
+  new ResizeObserver(placeInd).observe(nav);
 
   modal({
     title: 'Settings',
-    width: 760,
+    width: 820,
+    className: 'settings-modal',
     body: h('div', { class: 'settings-layout' }, nav, content),
-    onOpen: ({ close }) => { closeSettings = close; },
+    onOpen: ({ close }) => { closeSettings = close; requestAnimationFrame(placeInd); },
     onClose: () => { closeSettings = null; },
     buttons: [
       { label: 'Cancel', value: null },
